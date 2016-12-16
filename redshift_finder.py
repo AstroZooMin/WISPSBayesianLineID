@@ -108,7 +108,6 @@ def fit_spectrum(wl,flux,flux_error,bc03_folder,ML_ratio=1,plot=False,z_max = 3,
     try:
         z=z_array[jsave]
     except UnboundLocalError:
-        print "Par {0} Target {1}: File exists, but is bad".format(Par,beam)
         if return_spectrum:
             return -99,-99,-99,[-99],[-99]
         else:    
