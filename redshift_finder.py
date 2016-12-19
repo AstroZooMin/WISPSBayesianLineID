@@ -12,7 +12,7 @@ def extract_spectrum(Par,beam,spectrum_folder):
         real_spectrum = np.loadtxt(os.path.join(spectrum_folder,'Par'+str(Par)+'/Spectra/Par'+str(Par)+'_BEAM_'+str(beam)+'A.dat'))
     except IOError:
         print "Par {0} Target {1}: File does not exist".format(Par,beam)
-        return [-99,-99,-99]
+        return [[-99],[-99],[-99]]
    #Smoothing and clipping    
     if len(real_spectrum.T[0]) > 150:  #if both grisms are present
         g141_lambda = real_spectrum.T[0][134:]
