@@ -62,7 +62,7 @@ def convolve_tmpl_resp(template,z,response):
 def get_flux(w0,w1,template):
     cond = (w0<=template['waves']) & (template['waves']<w1)
     if len(template[cond]) == 0: return 0
-    flux = scipy.integrate.simps(template['flux'][cond],x=template['waves'][cond]) / (w1-w0)
+    flux = scipy.integrate.simps(template['flux'][cond],x=template['waves'][cond])
     return flux
 
 def get_direct_catalog(direct_catname,img_hdr):
@@ -135,11 +135,22 @@ def get_stamp(img,entry,cutx,cuty,fill_value=0,mask=True):
         ix,iy = np.array(ix,dtype=int),np.array(iy,dtype=int)
         img[iy,ix] = fill_value
 
-    pos    = (entry['X_IMAGE']-1, entry['Y_IMAGE']-1)
+    pos    = (round(entry['X_IMAGE'])-1, round(entry['Y_IMAGE'])-1)
     size   = (cuty,cutx)
     stamp  = Cutout2D(data=img,position=pos,size=size,mode='partial',fill_value=0).data
-    stamp = np.ma.masked_array(stamp,mask=~np.isfinite(stamp),fill_value=np.NaN)
-    return stamp
+    stamp  = np.ma.masked_array(stamp,mask=~np.isfinite(stamp),fill_value=np.NaN)
+
+    y,x = np.arange(stamp.shape[0]), np.arange(stamp.shape[1])
+    stamp_interp = scipy.interpolate.interp2d(x,y,stamp,kind='linear')
+    dy,dx = entry['Y_IMAGE']-1-pos[1], entry['X_IMAGE']-1-pos[0]
+    y,x = y+dy,x+dx
+    _stamp = stamp_interp(x,y)
+
+    # print dx,dy,entry['X_IMAGE'],entry['Y_IMAGE']
+    # plt.imshow(_stamp-stamp,origin='lower',interpolation='none')
+    # plt.show()
+
+    return _stamp
 
 def mk_contam(par,entry,grism,direct,tmpl_dir,output_dir='.',savefits=False):
 
@@ -155,16 +166,15 @@ def mk_contam(par,entry,grism,direct,tmpl_dir,output_dir='.',savefits=False):
     grism_name = os.path.join(parent_dir,"Par%i"%par,"%s_DRIZZLE"%grism,"aXeWFC3_%s_mef_ID%i.fits"%(grism,objid))
     grism_img,grism_hdr = fitsio.getdata(grism_name,extname='SCI',header=True)
     grism_wht   = fitsio.getdata(grism_name,extname='WHT')
-    grism_waves = get_waves(np.arange(grism_img.shape[1])+2,grism_hdr)
-    print grism_waves
-    assert len(np.unique(np.diff(grism_waves))) == 1
+    grism_img   = np.ma.masked_array(grism_img,mask=grism_img==0)
+    grism_wht   = np.ma.masked_array(grism_wht,mask=grism_wht==0)
+    grism_waves = get_waves(np.arange(grism_img.shape[1])+1,grism_hdr)
     grism_dwaves = np.unique(np.diff(grism_waves))[0]
-    if grism_img.shape[0]%2!=0: grism_img = grism_img[:-1,:]
+    #if grism_img.shape[0]%2!=0: grism_img = grism_img[:-1,:]
     dy = dx = grism_img.shape[0]
-    #if dy%2!=0: dx = dy = dy-1
 
-    direct_img,direct_img_hdr = fitsio.getdata(os.path.join(parent_dir,"Par%i"%par,"DATA/DIRECT_GRISM","%s.fits"%direct),extname='SCI',header=True)
-    direct_img     =  direct_img - direct_img_hdr['MDRIZSKY']
+    direct_img,direct_img_hdr = fitsio.getdata(os.path.join(parent_dir,"Par%i"%par,"DATA/DIRECT_GRISM","%s.fits"%direct),header=True)
+    direct_img     = direct_img - direct_img_hdr['MDRIZSKY']
     direct_catname = os.path.join(parent_dir,"Par%i"%par,"DATA/DIRECT_GRISM","fin_%s.cat"%direct)
     direct_cat     = get_direct_catalog(direct_catname,direct_img_hdr)
     direct_entry   = direct_cat[direct_cat['OBJ_NUM'] == objid][0]
@@ -175,21 +185,16 @@ def mk_contam(par,entry,grism,direct,tmpl_dir,output_dir='.',savefits=False):
     # For plotting
     direct_stamp_msk   = direct_stamp.copy()
     direct_stamp_unmsk = get_stamp(direct_img,direct_entry,cutx=dx,cuty=dy,mask=False)
+    
+    # Normalizing the stamp
     norm = 10**((direct_entry['MAG'] - zp[direct]) / -2.5)
+    # norm = np.ma.sum(direct_stamp)
     direct_stamp /= norm
 
-    spex_mod = fitsio.getdata(grism_name,extname='MOD')
-    # spex_mod1d = np.average(spex_mod,axis=1)
-    # spex_mod2d = np.zeros(direct_stamp.shape)
-    # for i in range(direct_stamp.shape[1]): spex_mod2d[:,i] = spex_mod1d
-    # norm2 = np.sum(direct_stamp * spex_mod2d)
-    # direct_stamp = direct_stamp * spex_mod2d / norm2
-
     model = np.zeros(grism_img.shape)
-
     for i,w in enumerate(grism_waves):
 
-        w0,w1 = w-grism_dwaves, w+grism_dwaves
+        w0,w1 = w-grism_dwaves/2., w+grism_dwaves/2.
         ampl = get_flux(w0,w1,template)
         ymin,ymax = 0,dy
         xmin,xmax = i-dx/2,i+dx/2
@@ -202,18 +207,25 @@ def mk_contam(par,entry,grism,direct,tmpl_dir,output_dir='.',savefits=False):
         else:
             galaxy = direct_stamp
 
-        spex_mod1d = spex_mod[:,i]
-        norm = np.ma.sum(np.ma.sum(direct_stamp,axis=1) * spex_mod1d)
-        spex_mod2d = np.zeros(galaxy.shape)
-        for i in range(galaxy.shape[1]): spex_mod2d[:,i] = spex_mod1d
-        model[ymin:ymax,xmin:xmax] += (ampl * galaxy * spex_mod2d / norm)
+        model[ymin:ymax,xmin:xmax] += ampl * galaxy
     
-    """
-    plt.plot(grism_waves,np.sum(grism_img*spex_mod,axis=0),c='b')
-    plt.plot(grism_waves,np.sum(model,axis=0)*np.sum(spex_mod,axis=0),c='r')
-    plt.plot(template['waves'],template['flux'],c='k')
-    plt.show()
-    """
+    offset = np.ma.sum(grism_img*grism_wht,axis=0) / np.ma.sum(model*grism_wht,axis=0)
+    norm   = np.ma.median(offset)
+    print norm
+
+    # plt.plot(grism_waves,offset)
+    # plt.axhline(norm)
+    # plt.ylim(0,25)
+    # plt.show()
+
+    # spec = np.genfromtxt(os.path.join(parent_dir,"Par%i"%par,"Spectra/Par%i_%s_BEAM_%iA.dat"%(par,grism,objid)))
+    # plt.plot(grism_waves,np.ma.sum(grism_img*grism_wht,axis=0)/np.ma.sum(grism_wht,axis=0)*(np.ma.sum(grism_wht,axis=0) / grism_dwaves),c='b',label='Grism --> 1D spectrum')
+    # plt.plot(grism_waves,np.ma.sum(model*grism_wht,axis=0)/np.ma.sum(grism_wht,axis=0)*(np.ma.sum(grism_wht,axis=0) / grism_dwaves),c='r',label='Model --> 1D spectrum')
+    # plt.plot(template['waves'],template['flux'],c='g',label='Continuum Template')
+    # plt.plot(spec[:,0],spec[:,1]*response(spec[:,0]),c='k',label='aXe 1D spectrum')
+    # plt.legend()
+    # plt.xlim(spec[0,0],spec[-1,0])
+    # plt.show()
 
     clean = grism_img - model
 
@@ -266,20 +278,20 @@ def mk_plot(stamp,_stamp,grism_img,grism_hdr,model,clean,savename):
 
 if __name__ == '__main__':
     
-    parent_dir = "/data/highzgal/PUBLICACCESS/WISPS/data/V5.0/"
-    cwd = "/data/highzgal/mehta/WISP/WISPSBayesianLineID/"
+    parent_dir = "/data/highzgal/PUBLICACCESS/WISPS/data/V6.2/"
+    cwd = "../../WISPSBayesianLineID/"
     tmpl_dir = os.path.join(cwd,"bc03_models")
     conf_dir = os.path.join(cwd,"continuum_model/config")
     redshifts = fitsio.getdata(os.path.join(cwd,'Par96_estimates.fits'))
 
-    # for entry in redshifts[:100]:
+    # for entry in redshifts:
     #     print "Obj#%i"%entry['target']
     #     for grism,filt in zip(['G102','G141'],['F110','F160']):
     #         stamp,_stamp,grism_img,grism_hdr,model,clean = mk_contam(par=96,entry=entry,grism=grism,direct=filt,tmpl_dir=tmpl_dir,savefits=False)
     #         mk_plot(stamp,_stamp,grism_img,grism_hdr,model,clean,savename='plots/Par96_ID%i_%s.png' % (entry['target'],grism))
     
-    entry = redshifts[redshifts['target']==13][0]
-    print entry
+    entry = redshifts[redshifts['target']==122][0]
+    print entry[:-3]
     stamp,_stamp,grism_img,grism_hdr,model,clean = mk_contam(par=96,entry=entry,grism='G141',direct='F160',tmpl_dir=tmpl_dir,savefits=False)
     mk_plot(stamp,_stamp,grism_img,grism_hdr,model,clean,savename=None)
     plt.show()
