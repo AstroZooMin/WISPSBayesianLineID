@@ -90,3 +90,15 @@ ENV/
 
 # Custom filters
 modelFitResults/*
+
+BayesianFramework/g141_withCleanlinessAndMatchedLineIds.fits
+
+BayesianFramework/g141_withCleanliness.fits
+
+BayesianFramework/g141_withCleanliness.cat
+
+BayesianFramework/g102_withCleanlinessAndMatchedLineIds.fits
+
+BayesianFramework/g102_withCleanliness.fits
+
+BayesianFramework/g102_withCleanliness.cat
