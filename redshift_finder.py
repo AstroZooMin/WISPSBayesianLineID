@@ -424,17 +424,17 @@ def fit_spectrum((wl, flux, flux_error, contam, bc03_folder, Par, target, spectr
     # Create an array containing the a copy of the value of the median of
     # valid values of the input flux array for every model spectrum for every
     # trial redshift!
-    # FIXME: Am I missing something here? Since the elements of ff are identical,
-    # this performs the same (very expensive) median calculation a huge number
-    # of times for no reason!
-    ff_n = np.array([[np.ma.median(np.ma.masked_invalid(ff[z][j]))
-                      for j in range(len(spec))] for z in range(len(z_array))])
-    # FIXME: Similar innefficiency (can also use numpy broadcasting for this I think).
-    flux_normed = np.array([[ff[z][j] / ff_n[z][j]
-                             for j in range(len(spec))] for z in range(len(z_array))])
-    # FIXME: And again!
-    flux_err_normed = np.array(
-        [[fe[z][j] / ff_n[z][j] for j in range(len(spec))] for z in range(len(z_array))])
+    median_flux = np.ma.median(np.ma.masked_invalid(ff[0][0]))
+    ff_n = np.full_like(a=ff[:, :, 0], fill_value=median_flux)
+    # Create an array containing the a copy of the median-normalized data flux
+    # array for every model spectrum for every trial redshift!
+    normed_flux_array = ff[0][0] / median_flux
+    flux_normed = np.full_like(a=ff[:, :, 0], fill_value=normed_flux_array)
+    # Create an array containing the a copy of the data flux ERROR array normalized
+    # by the median of the data FLUX array for every model spectrum for every trial
+    # redshift!
+    normed_flux_err_array = fe[0][0] / ff_n[0][0]
+    flux_err_normed = np.full_like(a=ff[:, :, 0], fill_value=normed_flux_err_array)
     # COMPUTE THE LOG-LIKELIHOOD FOR ALL MODELS GIVEN THE INPUT DATA.
     # Compute the element-wise contribution to the log likelihood (-0.5*chi-square)
     g = -((flux_normed - np.array(models))**2) / (2 * flux_err_normed**2)
